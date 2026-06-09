@@ -344,7 +344,6 @@ def download_file(filename):
     )
 
 if __name__ == '__main__':
-    print("🚀 Servidor iniciado en http://localhost:5000")
-    print("📁 Las descargas se guardarán en:", DOWNLOAD_FOLDER.absolute())
-    print("🎵 FFmpeg disponible:", "Sí" if verificar_ffmpeg() else "No (los MP3 pueden no funcionar)")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Render usa el puerto asignado por la variable de entorno
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
