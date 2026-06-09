@@ -60,20 +60,19 @@ TEMP_FOLDER.mkdir(exist_ok=True)
 descargas_activas = {}
 
 def verificar_ffmpeg():
-    """Verifica si ffmpeg está disponible"""
+    """Verifica si ffmpeg está disponible en el servidor"""
+    import subprocess
+    import platform
+    
+    # En Render, no está disponible
+    if 'RENDER' in os.environ:
+        return False
+    
     try:
-        # Buscar ffmpeg en el sistema
-        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
-        if result.returncode == 0:
-            return True
-    except:
-        pass
-    
-    # Buscar en la carpeta del proyecto
-    if (Path(__file__).parent / 'ffmpeg.exe').exists():
+        subprocess.run(['ffmpeg', '-version'], capture_output=True)
         return True
-    
-    return False
+    except:
+        return False
 
 def obtener_info_video(url):
     """Obtiene información del video con manejo de errores mejorado"""
