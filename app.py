@@ -77,25 +77,41 @@ _COOKIE_PATH = _inicializar_cookies()
 def _cookies_disponibles():
     return _COOKIE_PATH is not None
 
-BASE_EXTRACTOR_ARGS = {
-    'youtube': {
-        'player_client': ['web', 'android', 'web_creator'],
-    },
-}
+_SKIP = {'player_skip': ['webpage', 'configs']}
 
-def _ydl_base_opts():
-    opts = {
+def _estrategias():
+    base = {
         'quiet': True,
         'no_warnings': True,
         'http_headers': COMMON_HEADERS,
         'extract_flat': False,
-        'extractor_args': BASE_EXTRACTOR_ARGS,
+        'js_runtimes': {'node': {}},
+        'remote_components': ['ejs:github'],
     }
-    opts['js_runtimes'] = {'node': {}}
-    opts['remote_components'] = ['ejs:github']
+
+    e = []
+
     if _cookies_disponibles():
-        opts['cookiefile'] = _COOKIE_PATH
-    return opts
+        e.append({
+            **base,
+            'cookiefile': _COOKIE_PATH,
+            'extractor_args': {'youtube': {'player_client': ['web'], **_SKIP}},
+        })
+
+    e.append({
+        **base,
+        'extractor_args': {'youtube': {'player_client': ['android'], **_SKIP}},
+    })
+
+    if _cookies_disponibles():
+        e.append({
+            **base,
+            'cookiefile': _COOKIE_PATH,
+            'extractor_args': {'youtube': {'player_client': ['web_creator'], **_SKIP}},
+        })
+
+    return e
+
 
 def verificar_ffmpeg():
     if 'RENDER' in os.environ:
@@ -139,24 +155,22 @@ def obtener_info_video(url):
             'error': 'HBO Max usa proteccion DRM y NO se puede descargar.'
         }
 
-    ydl_opts = _ydl_base_opts()
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception as e:
-        error_msg = str(e)
-        if 'Sign in' in error_msg:
-            error_msg = 'YouTube requiere verificacion. Las cookies expiraron o Render esta bloqueado. Prueba exportar cookies frescas desde tu navegador.'
-        elif 'DRM' in error_msg:
-            return {
-                'success': False,
-                'error': 'Este sitio usa proteccion DRM y no permite descargas.\n\nPrueba con YouTube, Vimeo, Dailymotion o SoundCloud.'
-            }
-        return {
-            'success': False,
-            'error': f'Error: {error_msg}'
-        }
+    estrategias = _estrategias()
+    for ydl_opts in estrategias:
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            break
+        except Exception as e:
+            error_msg = str(e)
+            if 'Sign in' in error_msg:
+                print(f"[yt] Sign in con {ydl_opts.get('extractor_args',{})}, probando siguiente")
+                continue
+            if 'DRM' in error_msg:
+                return {'success': False, 'error': 'Este sitio usa proteccion DRM y no permite descargas.\n\nPrueba con YouTube, Vimeo, Dailymotion o SoundCloud.'}
+            return {'success': False, 'error': f'Error: {error_msg}'}
+    else:
+        return {'success': False, 'error': 'YouTube bloquea este servidor. Probá descargar desde tu casa o actualizá las cookies.'}
 
     formatos_video = []
 
@@ -200,57 +214,58 @@ def descargar_video(url, formato_id, es_audio=False, callback_id=None):
     nombre_archivo = str(uuid.uuid4())
     ffmpeg_disponible = verificar_ffmpeg()
 
-    base_opts = _ydl_base_opts()
-    base_opts['outtmpl'] = str(DOWNLOAD_FOLDER / f'{nombre_archivo}.%(ext)s')
-    base_opts['progress_hooks'] = [lambda d: hook_progreso(d, callback_id)]
+    for base_opts in _estrategias():
+        base_opts['outtmpl'] = str(DOWNLOAD_FOLDER / f'{nombre_archivo}.%(ext)s')
+        base_opts['progress_hooks'] = [lambda d: hook_progreso(d, callback_id)]
 
-    if es_audio:
-        if ffmpeg_disponible:
-            ydl_opts = {
-                **base_opts,
-                'format': 'bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-            }
+        if es_audio:
+            if ffmpeg_disponible:
+                ydl_opts = {
+                    **base_opts,
+                    'format': 'bestaudio/best',
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }],
+                }
+            else:
+                ydl_opts = {
+                    **base_opts,
+                    'format': 'bestaudio/best',
+                }
         else:
             ydl_opts = {
                 **base_opts,
-                'format': 'bestaudio/best',
+                'format': formato_id if formato_id else 'best',
+                'merge_output_format': 'mp4',
             }
-    else:
-        ydl_opts = {
-            **base_opts,
-            'format': formato_id if formato_id else 'best',
-            'merge_output_format': 'mp4',
-        }
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            archivo_generado = ydl.prepare_filename(info)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                archivo_generado = ydl.prepare_filename(info)
 
-            if es_audio and not ffmpeg_disponible:
-                archivo_sin_ext = archivo_generado.rsplit('.', 1)[0]
-                archivo_mp3 = archivo_sin_ext + '.mp3'
-                if archivo_generado != archivo_mp3:
-                    os.rename(archivo_generado, archivo_mp3)
-                    archivo_generado = archivo_mp3
-            elif es_audio and ffmpeg_disponible:
-                archivo_generado = archivo_generado.rsplit('.', 1)[0] + '.mp3'
+                if es_audio and not ffmpeg_disponible:
+                    archivo_sin_ext = archivo_generado.rsplit('.', 1)[0]
+                    archivo_mp3 = archivo_sin_ext + '.mp3'
+                    if archivo_generado != archivo_mp3:
+                        os.rename(archivo_generado, archivo_mp3)
+                        archivo_generado = archivo_mp3
+                elif es_audio and ffmpeg_disponible:
+                    archivo_generado = archivo_generado.rsplit('.', 1)[0] + '.mp3'
 
-            return {
-                'success': True,
-                'archivo': archivo_generado,
-                'nombre': info.get('title', 'video')
-            }
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e)
-        }
+                return {
+                    'success': True,
+                    'archivo': archivo_generado,
+                    'nombre': info.get('title', 'video')
+                }
+        except Exception as e:
+            if 'Sign in' in str(e):
+                continue
+            return {'success': False, 'error': str(e)}
+
+    return {'success': False, 'error': 'YouTube bloquea este servidor. Probá descargar desde tu casa o actualizá las cookies.'}
 
 def hook_progreso(d, callback_id):
     if callback_id and callback_id in descargas_activas:
