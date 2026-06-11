@@ -67,11 +67,14 @@ def extraer_cookies_brave():
     return True
 
 if __name__ == "__main__":
-    print("🔍 Extrayendo cookies de Brave...")
-    print("⚠️ Asegúrate de haber cerrado Brave completamente")
+    import sys
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+    print("[INFO] Extrayendo cookies de Brave...")
+    print("[INFO] Asegurate de haber cerrado Brave completamente")
     input("Presiona Enter para continuar...")
     
     if extraer_cookies_brave():
-        print("\n✅ ¡Listo! Ahora ejecuta test_cookies.py")
+        print("[OK] Listo! cookies.txt generado")
     else:
-        print("\n❌ Error. Usa la Opción 2 (extensión manual)")
+        print("[ERROR] No se pudieron extraer cookies")
