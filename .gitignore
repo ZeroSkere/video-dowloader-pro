@@ -26,11 +26,12 @@ temp/
 Thumbs.db
 desktop.ini
 
-# Cookies (NUNCA subir a git - contiene tokens de autenticacion)
+# Cookies / Contexto (NUNCA subir a git)
 cookies.txt
 cookies_*.txt
 cookies_b64.txt
 .cookies_tmp.txt
+AGENTS.md
 quick_test.py
 test_*.py
 
