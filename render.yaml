@@ -2,8 +2,11 @@ services:
   - type: web
     name: video-downloader-pro
     runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    buildCommand: |
+      mkdir -p node && \
+      curl -fsSL https://nodejs.org/dist/v20.19.0/node-v20.19.0-linux-x64.tar.xz | tar -xJ --strip=1 -C ./node && \
+      pip install -r requirement.txt
+    startCommand: PATH="./node/bin:$PATH" gunicorn app:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0

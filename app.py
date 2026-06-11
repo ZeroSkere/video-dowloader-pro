@@ -45,15 +45,43 @@ def verificar_ffmpeg():
     except:
         return False
 
-def _add_cookies_if_valid(ydl_opts):
+def _cookies_disponibles():
     cookiefile = Path(__file__).parent / 'cookies.txt'
     if cookiefile.exists() and cookiefile.stat().st_size > 100:
         try:
             contenido = cookiefile.read_text(encoding='utf-8')
-            if 'youtube.com' in contenido:
-                ydl_opts['cookiefile'] = str(cookiefile)
+            return 'youtube.com' in contenido
         except:
             pass
+    return False
+
+def _ydl_base_opts():
+    """Configuracion base: sin cookies usa android client, con cookies usa web"""
+    opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'http_headers': COMMON_HEADERS,
+    }
+
+    # JS runtime necesario para YouTube (Node.js)
+    opts['js_runtimes'] = {'node': {}}
+    opts['remote_components'] = ['ejs:github']
+
+    if _cookies_disponibles():
+        opts['cookiefile'] = str(Path(__file__).parent / 'cookies.txt')
+        opts['extractor_args'] = {
+            'youtube': {
+                'player_skip': ['webpage', 'configs'],
+            },
+        }
+    else:
+        opts['extractor_args'] = {
+            'youtube': {
+                'player_client': ['android'],
+                'player_skip': ['webpage', 'configs'],
+            },
+        }
+    return opts
 
 def obtener_info_video(url):
     """Obtiene información del video con manejo de errores mejorado"""
@@ -92,21 +120,8 @@ def obtener_info_video(url):
         }
     
     # Continuar con la descarga normal para plataformas compatibles
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': False,
-        'http_headers': COMMON_HEADERS,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android'],
-                'player_skip': ['webpage', 'configs'],
-            },
-        },
-    }
-
-    # Usar cookies.txt si existe (respaldo para casos donde android client no baste)
-    _add_cookies_if_valid(ydl_opts)
+    ydl_opts = _ydl_base_opts()
+    ydl_opts['extract_flat'] = False
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -167,21 +182,9 @@ def descargar_video(url, formato_id, es_audio=False, callback_id=None):
     nombre_archivo = str(uuid.uuid4())
     ffmpeg_disponible = verificar_ffmpeg()
     
-    base_opts = {
-        'outtmpl': str(DOWNLOAD_FOLDER / f'{nombre_archivo}.%(ext)s'),
-        'quiet': True,
-        'no_warnings': True,
-        'http_headers': COMMON_HEADERS,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android'],
-                'player_skip': ['webpage', 'configs'],
-            },
-        },
-        'progress_hooks': [lambda d: hook_progreso(d, callback_id)],
-    }
-
-    _add_cookies_if_valid(base_opts)
+    base_opts = _ydl_base_opts()
+    base_opts['outtmpl'] = str(DOWNLOAD_FOLDER / f'{nombre_archivo}.%(ext)s')
+    base_opts['progress_hooks'] = [lambda d: hook_progreso(d, callback_id)]
 
     if es_audio:
         if ffmpeg_disponible:
