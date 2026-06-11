@@ -163,7 +163,7 @@ def obtener_info_video(url):
             break
         except Exception as e:
             error_msg = str(e)
-            if 'Sign in' in error_msg:
+            if 'sign in' in error_msg.lower():
                 print(f"[yt] Sign in con {ydl_opts.get('extractor_args',{})}, probando siguiente")
                 continue
             if 'DRM' in error_msg:
@@ -261,7 +261,7 @@ def descargar_video(url, formato_id, es_audio=False, callback_id=None):
                     'nombre': info.get('title', 'video')
                 }
         except Exception as e:
-            if 'Sign in' in str(e):
+            if 'sign in' in str(e).lower():
                 continue
             return {'success': False, 'error': str(e)}
 
