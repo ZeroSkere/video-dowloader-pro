@@ -45,14 +45,51 @@ def verificar_ffmpeg():
     except:
         return False
 
-def _cookies_disponibles():
-    cookiefile = Path(__file__).parent / 'cookies.txt'
-    if cookiefile.exists() and cookiefile.stat().st_size > 100:
+def _buscar_cookies():
+    """Busca cookies.txt en orden: local, Render secret file, variable de entorno"""
+    # 1. Archivo local (desarrollo)
+    local = Path(__file__).parent / 'cookies.txt'
+    if local.exists() and local.stat().st_size > 100:
         try:
-            contenido = cookiefile.read_text(encoding='utf-8')
-            return 'youtube.com' in contenido
+            contenido = local.read_text(encoding='utf-8')
+            if 'youtube.com' in contenido:
+                return str(local)
         except:
             pass
+
+    # 2. Render Secret File
+    secret = os.environ.get('COOKIE_FILE_PATH', '/etc/secrets/cookies.txt')
+    if os.path.exists(secret) and os.path.getsize(secret) > 100:
+        try:
+            with open(secret, 'r', encoding='utf-8') as f:
+                if 'youtube.com' in f.read():
+                    return secret
+        except:
+            pass
+
+    # 3. Variable de entorno (base64)
+    env_cookies = os.environ.get('COOKIES_B64')
+    if env_cookies:
+        import base64
+        try:
+            contenido = base64.b64decode(env_cookies).decode('utf-8')
+            if 'youtube.com' in contenido:
+                tmp = Path(__file__).parent / '.cookies_tmp.txt'
+                tmp.write_text(contenido, encoding='utf-8')
+                return str(tmp)
+        except:
+            pass
+
+    return None
+
+_COOKIE_PATH = None
+
+def _cookies_disponibles():
+    global _COOKIE_PATH
+    ruta = _buscar_cookies()
+    if ruta:
+        _COOKIE_PATH = ruta
+        return True
     return False
 
 def _ydl_base_opts():
@@ -68,7 +105,7 @@ def _ydl_base_opts():
     opts['remote_components'] = ['ejs:github']
 
     if _cookies_disponibles():
-        opts['cookiefile'] = str(Path(__file__).parent / 'cookies.txt')
+        opts['cookiefile'] = _COOKIE_PATH
         opts['extractor_args'] = {
             'youtube': {
                 'player_skip': ['webpage', 'configs'],
