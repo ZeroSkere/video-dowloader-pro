@@ -79,7 +79,7 @@ def _cookies_disponibles():
 
 BASE_EXTRACTOR_ARGS = {
     'youtube': {
-        'player_client': ['android', 'web', 'web_creator'],
+        'player_client': ['web', 'android', 'web_creator'],
     },
 }
 
