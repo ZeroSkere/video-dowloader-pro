@@ -10,6 +10,7 @@ import sys
 import re
 from urllib.parse import urlparse, parse_qs
 from collections import deque
+import tempfile
 
 COMMON_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -33,12 +34,15 @@ queue_lock = threading.Lock()
 download_queue = deque()
 descargas_activas = {}
 
-def _buscar_cookies():
+def _inicializar_cookies():
+    import base64
+
     local = Path(__file__).parent / 'cookies.txt'
     if local.exists() and local.stat().st_size > 100:
         try:
             contenido = local.read_text(encoding='utf-8')
             if 'youtube.com' in contenido:
+                print(f"[cookies] usando archivo local: {local}")
                 return str(local)
         except:
             pass
@@ -48,33 +52,30 @@ def _buscar_cookies():
         try:
             with open(secret, 'r', encoding='utf-8') as f:
                 if 'youtube.com' in f.read():
+                    print(f"[cookies] usando secret file: {secret}")
                     return secret
         except:
             pass
 
     env_cookies = os.environ.get('COOKIES_B64')
     if env_cookies:
-        import base64
         try:
             contenido = base64.b64decode(env_cookies).decode('utf-8')
             if 'youtube.com' in contenido:
-                tmp = Path(__file__).parent / '.cookies_tmp.txt'
+                tmp = Path(tempfile.gettempdir()) / f'yt_cookies_{os.getpid()}.txt'
                 tmp.write_text(contenido, encoding='utf-8')
+                print(f"[cookies] usando env var, temp: {tmp}")
                 return str(tmp)
-        except:
-            pass
+        except Exception as e:
+            print(f"[cookies] error decodificando env var: {e}")
 
+    print("[cookies] NO hay cookies disponibles")
     return None
 
-_COOKIE_PATH = None
+_COOKIE_PATH = _inicializar_cookies()
 
 def _cookies_disponibles():
-    global _COOKIE_PATH
-    ruta = _buscar_cookies()
-    if ruta:
-        _COOKIE_PATH = ruta
-        return True
-    return False
+    return _COOKIE_PATH is not None
 
 def _ydl_base_opts():
     opts = {
