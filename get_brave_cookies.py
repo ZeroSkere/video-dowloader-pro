@@ -45,20 +45,22 @@ def extraer_cookies_brave():
         os.remove(temp_path)
         return False
     
-    # Escribir archivo cookies.txt
-    with open('cookies.txt', 'w') as f:
+    # Escribir archivo cookies.txt en formato Netscape
+    with open('cookies.txt', 'w', encoding='utf-8') as f:
+        f.write('# Netscape HTTP Cookie File\n')
+        f.write('# https://curl.se/rfc/cookie_spec.html\n\n')
         for row in cookies_data:
             host, path, secure, expires, name, value = row
+            domain_flag = 'TRUE' if host.startswith('.') else 'FALSE'
             secure_flag = 'TRUE' if secure else 'FALSE'
-            # Convertir timestamp
-            if expires > 0 and expires < 4000000000000:
-                expires = int(expires / 1000000)
-            elif expires > 4000000000000:
-                expires = int((expires - 116444736000000000) / 10000000)
+            if isinstance(expires, int) and expires > 0:
+                if expires > 4000000000000:
+                    expires = int((expires - 11644473600000000) / 1000000)
+                elif expires > 100000000000:
+                    expires = int(expires / 1000000)
             else:
                 expires = 0
-            
-            f.write(f"{host}\t{secure_flag}\t{path}\t{secure_flag}\t{expires}\t{name}\t{value}\n")
+            f.write(f"{host}\t{domain_flag}\t{path}\t{secure_flag}\t{expires}\t{name}\t{value}\n")
     
     conn.close()
     os.remove(temp_path)

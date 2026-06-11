@@ -27,7 +27,6 @@ Thumbs.db
 desktop.ini
 
 # Cookies y tests locales
-cookies.txt
 cookies_*.txt
 quick_test.py
 test_*.py
