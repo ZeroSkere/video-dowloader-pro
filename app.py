@@ -77,25 +77,25 @@ _COOKIE_PATH = _inicializar_cookies()
 def _cookies_disponibles():
     return _COOKIE_PATH is not None
 
+BASE_EXTRACTOR_ARGS = {
+    'youtube': {
+        'player_client': ['web', 'android', 'web_creator'],
+        'player_skip': ['webpage', 'configs'],
+    },
+}
+
 def _ydl_base_opts():
     opts = {
         'quiet': True,
         'no_warnings': True,
         'http_headers': COMMON_HEADERS,
+        'extract_flat': False,
+        'extractor_args': BASE_EXTRACTOR_ARGS,
     }
-
     opts['js_runtimes'] = {'node': {}}
     opts['remote_components'] = ['ejs:github']
-
     if _cookies_disponibles():
         opts['cookiefile'] = _COOKIE_PATH
-    else:
-        opts['extractor_args'] = {
-            'youtube': {
-                'player_client': ['android'],
-                'player_skip': ['webpage', 'configs'],
-            },
-        }
     return opts
 
 def verificar_ffmpeg():
@@ -141,43 +141,23 @@ def obtener_info_video(url):
         }
 
     ydl_opts = _ydl_base_opts()
-    ydl_opts['extract_flat'] = False
 
-    for intento in range(2):
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-            break
-        except Exception as e:
-            if 'Sign in' in str(e) and _cookies_disponibles() and intento == 0:
-                print(f"[yt] cookies fallaron en Render, reintentando sin cookies: {str(e)[:80]}")
-                ydl_opts = {
-                    'quiet': True,
-                    'no_warnings': True,
-                    'http_headers': COMMON_HEADERS,
-                    'extractor_args': {
-                        'youtube': {
-                            'player_client': ['android'],
-                            'player_skip': ['webpage', 'configs'],
-                        },
-                    },
-                }
-                if 'RENDER' not in os.environ:
-                    ydl_opts['js_runtimes'] = {'node': {}}
-                    ydl_opts['remote_components'] = ['ejs:github']
-            else:
-                error_msg = str(e)
-                if 'Sign in' in error_msg:
-                    error_msg = 'YouTube pide verificacion. Las cookies guardadas expiraron o no son validas desde este servidor.'
-                if 'DRM' in error_msg:
-                    return {
-                        'success': False,
-                        'error': 'Este sitio usa proteccion DRM y no permite descargas.\n\nPrueba con YouTube, Vimeo, Dailymotion o SoundCloud.'
-                    }
-                return {
-                    'success': False,
-                    'error': f'Error: {error_msg}'
-                }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as e:
+        error_msg = str(e)
+        if 'Sign in' in error_msg:
+            error_msg = 'YouTube requiere verificacion. Las cookies expiraron o Render esta bloqueado. Prueba exportar cookies frescas desde tu navegador.'
+        elif 'DRM' in error_msg:
+            return {
+                'success': False,
+                'error': 'Este sitio usa proteccion DRM y no permite descargas.\n\nPrueba con YouTube, Vimeo, Dailymotion o SoundCloud.'
+            }
+        return {
+            'success': False,
+            'error': f'Error: {error_msg}'
+        }
 
     formatos_video = []
 
@@ -248,51 +228,30 @@ def descargar_video(url, formato_id, es_audio=False, callback_id=None):
             'merge_output_format': 'mp4',
         }
 
-    for intento in range(2):
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                archivo_generado = ydl.prepare_filename(info)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            archivo_generado = ydl.prepare_filename(info)
 
-                if es_audio and not ffmpeg_disponible:
-                    archivo_sin_ext = archivo_generado.rsplit('.', 1)[0]
-                    archivo_mp3 = archivo_sin_ext + '.mp3'
-                    if archivo_generado != archivo_mp3:
-                        os.rename(archivo_generado, archivo_mp3)
-                        archivo_generado = archivo_mp3
-                elif es_audio and ffmpeg_disponible:
-                    archivo_generado = archivo_generado.rsplit('.', 1)[0] + '.mp3'
+            if es_audio and not ffmpeg_disponible:
+                archivo_sin_ext = archivo_generado.rsplit('.', 1)[0]
+                archivo_mp3 = archivo_sin_ext + '.mp3'
+                if archivo_generado != archivo_mp3:
+                    os.rename(archivo_generado, archivo_mp3)
+                    archivo_generado = archivo_mp3
+            elif es_audio and ffmpeg_disponible:
+                archivo_generado = archivo_generado.rsplit('.', 1)[0] + '.mp3'
 
-                return {
-                    'success': True,
-                    'archivo': archivo_generado,
-                    'nombre': info.get('title', 'video')
-                }
-        except Exception as e:
-            if 'Sign in' in str(e) and _cookies_disponibles() and intento == 0:
-                print(f"[yt] download: cookies fallaron, reintentando sin: {str(e)[:80]}")
-                base_opts.pop('cookiefile', None)
-                base_opts['extractor_args'] = {
-                    'youtube': {
-                        'player_client': ['android'],
-                        'player_skip': ['webpage', 'configs'],
-                    },
-                }
-                ydl_opts = {**base_opts}
-                ydl_opts['format'] = 'bestaudio/best' if es_audio else (formato_id if formato_id else 'best')
-                if not es_audio:
-                    ydl_opts['merge_output_format'] = 'mp4'
-                if es_audio and ffmpeg_disponible:
-                    ydl_opts['postprocessors'] = [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '192',
-                    }]
-            else:
-                return {
-                    'success': False,
-                    'error': str(e)
-                }
+            return {
+                'success': True,
+                'archivo': archivo_generado,
+                'nombre': info.get('title', 'video')
+            }
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
+        }
 
 def hook_progreso(d, callback_id):
     if callback_id and callback_id in descargas_activas:
