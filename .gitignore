@@ -26,6 +26,17 @@ temp/
 Thumbs.db
 desktop.ini
 
+# Cookies y tests locales
+cookies.txt
+cookies_*.txt
+quick_test.py
+test_*.py
+
+# Logs
+*.log
+app_std*.txt
+app_err*.txt
+
 # IDE
 .vscode/
 .idea/

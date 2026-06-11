@@ -10,41 +10,12 @@ import sys
 import re
 from urllib.parse import urlparse, parse_qs
 
-def spotify_a_youtube(url):
-    """Convierte URL de Spotify a búsqueda en YouTube"""
-    if 'spotify.com' not in url:
-        return url
-    
-    # Extraer información básica de la URL de Spotify
-    try:
-        # Si es una canción de Spotify
-        if '/track/' in url:
-            # Podrías usar la API de Spotify aquí
-            # Por ahora, indicamos que no es compatible
-            return None
-        elif '/playlist/' in url:
-            return None
-        elif '/album/' in url:
-            return None
-    except:
-        pass
-    
-    return None
-
-# Modifica la función obtener_info_video para manejar Spotify
-def obtener_info_video(url):
-    # Verificar si es Spotify
-    if 'spotify.com' in url:
-        return {
-            'success': False,
-            'error': '⚠️ Spotify usa protección DRM y no se puede descargar.\n\n💡 Sugerencia: Busca la canción en YouTube y usa el enlace de YouTube para descargar el MP3.'
-        }
-    
-    # Resto del código original...
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-    }
+# Headers HTTP para evitar bloqueos
+COMMON_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-us,en;q=0.5',
+}
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'tu-clave-secreta'
@@ -115,8 +86,15 @@ def obtener_info_video(url):
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
+        'http_headers': COMMON_HEADERS,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['web', 'android'],
+                'player_skip': ['webpage'],
+            }
+        },
     }
-    
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -176,39 +154,35 @@ def descargar_video(url, formato_id, es_audio=False, callback_id=None):
     nombre_archivo = str(uuid.uuid4())
     ffmpeg_disponible = verificar_ffmpeg()
     
+    base_opts = {
+        'outtmpl': str(DOWNLOAD_FOLDER / f'{nombre_archivo}.%(ext)s'),
+        'quiet': True,
+        'no_warnings': True,
+        'http_headers': COMMON_HEADERS,
+        'progress_hooks': [lambda d: hook_progreso(d, callback_id)],
+    }
+
     if es_audio:
         if ffmpeg_disponible:
-            # Usar ffmpeg para convertir a MP3
             ydl_opts = {
+                **base_opts,
                 'format': 'bestaudio/best',
-                'outtmpl': str(DOWNLOAD_FOLDER / f'{nombre_archivo}.%(ext)s'),
-                'quiet': True,
-                'no_warnings': True,
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
                     'preferredquality': '192',
                 }],
-                'progress_hooks': [lambda d: hook_progreso(d, callback_id)],
             }
         else:
-            # Descargar el mejor audio disponible sin convertir
             ydl_opts = {
+                **base_opts,
                 'format': 'bestaudio/best',
-                'outtmpl': str(DOWNLOAD_FOLDER / f'{nombre_archivo}.%(ext)s'),
-                'quiet': True,
-                'no_warnings': True,
-                'progress_hooks': [lambda d: hook_progreso(d, callback_id)],
             }
     else:
-        # Descargar video
         ydl_opts = {
+            **base_opts,
             'format': formato_id if formato_id else 'best',
-            'outtmpl': str(DOWNLOAD_FOLDER / f'{nombre_archivo}.%(ext)s'),
-            'quiet': True,
-            'no_warnings': True,
             'merge_output_format': 'mp4',
-            'progress_hooks': [lambda d: hook_progreso(d, callback_id)],
         }
     
     try:
