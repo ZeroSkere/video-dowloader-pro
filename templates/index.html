@@ -514,15 +514,22 @@
                     const response = await fetch(`/progress/${downloadIdActual}`);
                     const data = await response.json();
                     
-                    if (data.completado) {
+                    if (data.status === 'error') {
+                        clearInterval(interval);
+                        mostrarAlerta('Error en la descarga: ' + data.error, 'error');
+                        document.getElementById('progressContainer').style.display = 'none';
+                        downloadIdActual = null;
+                        return;
+                    }
+                    
+                    if (data.status === 'completado') {
                         clearInterval(interval);
                         if (data.success) {
-                            mostrarAlerta('✅ ¡Descarga completada con éxito!', 'success');
+                            mostrarAlerta('Descarga completada con exito!', 'success');
                             document.getElementById('progressFill').style.width = '100%';
                             document.getElementById('progressFill').textContent = '100%';
-                            document.getElementById('progressText').textContent = '¡Completado! Preparando archivo...';
+                            document.getElementById('progressText').textContent = 'Completado! Preparando archivo...';
                             
-                            // Esperar un momento y luego descargar
                             setTimeout(() => {
                                 window.location.href = `/download_file/${data.archivo}`;
                             }, 1000);
@@ -532,15 +539,27 @@
                                 downloadIdActual = null;
                             }, 4000);
                         } else {
-                            mostrarAlerta('❌ Error en la descarga: ' + data.error, 'error');
+                            mostrarAlerta('Error en la descarga: ' + data.error, 'error');
                             document.getElementById('progressContainer').style.display = 'none';
                             downloadIdActual = null;
                         }
-                    } else {
+                        return;
+                    }
+                    
+                    if (data.status === 'queued') {
+                        const pos = data.posicion || 1;
+                        document.getElementById('progressFill').style.width = '0%';
+                        document.getElementById('progressFill').textContent = '0%';
+                        document.getElementById('progressText').textContent = `En cola... puesto #${pos}`;
+                        return;
+                    }
+                    
+                    if (data.status === 'downloading') {
                         const porcentaje = Math.round(data.progreso);
                         document.getElementById('progressFill').style.width = `${porcentaje}%`;
                         document.getElementById('progressFill').textContent = `${porcentaje}%`;
                         document.getElementById('progressText').textContent = `Descargando... ${porcentaje}%`;
+                        return;
                     }
                 } catch (error) {
                     console.error('Error monitoreando:', error);

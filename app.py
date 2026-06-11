@@ -9,8 +9,8 @@ import subprocess
 import sys
 import re
 from urllib.parse import urlparse, parse_qs
+from collections import deque
 
-# Headers HTTP para evitar bloqueos
 COMMON_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -21,33 +21,19 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'tu-clave-secreta'
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 
-# Crear carpetas necesarias
 DOWNLOAD_FOLDER = Path(__file__).parent / 'downloads'
 DOWNLOAD_FOLDER.mkdir(exist_ok=True)
 
 TEMP_FOLDER = Path(__file__).parent / 'temp'
 TEMP_FOLDER.mkdir(exist_ok=True)
 
+MAX_CONCURRENT = 2
+download_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT)
+queue_lock = threading.Lock()
+download_queue = deque()
 descargas_activas = {}
 
-def verificar_ffmpeg():
-    """Verifica si ffmpeg está disponible en el servidor"""
-    import subprocess
-    import platform
-    
-    # En Render, no está disponible
-    if 'RENDER' in os.environ:
-        return False
-    
-    try:
-        subprocess.run(['ffmpeg', '-version'], capture_output=True)
-        return True
-    except:
-        return False
-
 def _buscar_cookies():
-    """Busca cookies.txt en orden: local, Render secret file, variable de entorno"""
-    # 1. Archivo local (desarrollo)
     local = Path(__file__).parent / 'cookies.txt'
     if local.exists() and local.stat().st_size > 100:
         try:
@@ -57,7 +43,6 @@ def _buscar_cookies():
         except:
             pass
 
-    # 2. Render Secret File
     secret = os.environ.get('COOKIE_FILE_PATH', '/etc/secrets/cookies.txt')
     if os.path.exists(secret) and os.path.getsize(secret) > 100:
         try:
@@ -67,7 +52,6 @@ def _buscar_cookies():
         except:
             pass
 
-    # 3. Variable de entorno (base64)
     env_cookies = os.environ.get('COOKIES_B64')
     if env_cookies:
         import base64
@@ -93,14 +77,12 @@ def _cookies_disponibles():
     return False
 
 def _ydl_base_opts():
-    """Configuracion base: sin cookies usa android client, con cookies usa web"""
     opts = {
         'quiet': True,
         'no_warnings': True,
         'http_headers': COMMON_HEADERS,
     }
 
-    # JS runtime necesario para YouTube (Node.js)
     opts['js_runtimes'] = {'node': {}}
     opts['remote_components'] = ['ejs:github']
 
@@ -120,53 +102,57 @@ def _ydl_base_opts():
         }
     return opts
 
+def verificar_ffmpeg():
+    if 'RENDER' in os.environ:
+        return False
+    try:
+        subprocess.run(['ffmpeg', '-version'], capture_output=True)
+        return True
+    except:
+        return False
+
 def obtener_info_video(url):
-    """Obtiene información del video con manejo de errores mejorado"""
-    
-    # Detectar plataformas con DRM
     url_lower = url.lower()
-    
+
     if 'spotify.com' in url_lower:
         return {
             'success': False,
-            'error': '❌ Spotify usa protección DRM y NO se puede descargar.\n\n✅ Alternativas:\n• Busca la canción en YouTube y usa ese enlace\n• Usa la aplicación oficial de Spotify para descargar (solo Premium)'
+            'error': 'Spotify usa proteccion DRM y NO se puede descargar.\n\nAlternativas:\nBusca la cancion en YouTube y usa ese enlace\nUsa la aplicacion oficial de Spotify para descargar (solo Premium)'
         }
-    
+
     if 'netflix.com' in url_lower:
         return {
             'success': False,
-            'error': '❌ Netflix usa protección DRM y NO se puede descargar.\n\n✅ Usa la aplicación oficial de Netflix para descargas offline.'
+            'error': 'Netflix usa proteccion DRM y NO se puede descargar.\n\nUsa la aplicacion oficial de Netflix para descargas offline.'
         }
-    
+
     if 'primevideo.com' in url_lower or 'amazon.com' in url_lower and 'video' in url_lower:
         return {
             'success': False,
-            'error': '❌ Amazon Prime Video usa protección DRM y NO se puede descargar.\n\n✅ Usa la aplicación oficial de Prime Video para descargas offline.'
+            'error': 'Amazon Prime Video usa proteccion DRM y NO se puede descargar.\n\nUsa la aplicacion oficial de Prime Video para descargas offline.'
         }
-    
+
     if 'disneyplus.com' in url_lower:
         return {
             'success': False,
-            'error': '❌ Disney+ usa protección DRM y NO se puede descargar.\n\n✅ Usa la aplicación oficial de Disney+ para descargas offline.'
+            'error': 'Disney+ usa proteccion DRM y NO se puede descargar.\n\nUsa la aplicacion oficial de Disney+ para descargas offline.'
         }
-    
+
     if 'hbomax.com' in url_lower or 'max.com' in url_lower:
         return {
             'success': False,
-            'error': '❌ HBO Max usa protección DRM y NO se puede descargar.'
+            'error': 'HBO Max usa proteccion DRM y NO se puede descargar.'
         }
-    
-    # Continuar con la descarga normal para plataformas compatibles
+
     ydl_opts = _ydl_base_opts()
     ydl_opts['extract_flat'] = False
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            
-            # Obtener formatos de video
+
             formatos_video = []
-            
+
             for f in info.get('formats', []):
                 formato = {
                     'format_id': f.get('format_id'),
@@ -176,14 +162,14 @@ def obtener_info_video(url):
                     'vcodec': f.get('vcodec'),
                     'acodec': f.get('acodec'),
                 }
-                
+
                 if formato['vcodec'] != 'none' and formato['resolution'] != 'N/A':
                     if formato['filesize']:
                         formato['filesize_mb'] = round(formato['filesize'] / (1024 * 1024), 2)
                     else:
                         formato['filesize_mb'] = 'N/A'
                     formatos_video.append(formato)
-            
+
             if not formatos_video:
                 formatos_video.append({
                     'format_id': 'best',
@@ -191,12 +177,12 @@ def obtener_info_video(url):
                     'resolution': 'Mejor calidad',
                     'filesize_mb': 'N/A',
                 })
-            
+
             formatos_video.sort(key=lambda x: x.get('resolution', '0p'), reverse=True)
-            
+
             return {
                 'success': True,
-                'titulo': info.get('title', 'Sin título'),
+                'titulo': info.get('title', 'Sin titulo'),
                 'duracion': info.get('duration', 0),
                 'thumbnail': info.get('thumbnail', ''),
                 'formatos_video': formatos_video[:10],
@@ -207,7 +193,7 @@ def obtener_info_video(url):
         if 'DRM' in error_msg:
             return {
                 'success': False,
-                'error': '❌ Este sitio usa protección DRM y no permite descargas.\n\n✅ Prueba con YouTube, Vimeo, Dailymotion o SoundCloud.'
+                'error': 'Este sitio usa proteccion DRM y no permite descargas.\n\nPrueba con YouTube, Vimeo, Dailymotion o SoundCloud.'
             }
         return {
             'success': False,
@@ -215,10 +201,9 @@ def obtener_info_video(url):
         }
 
 def descargar_video(url, formato_id, es_audio=False, callback_id=None):
-    """Descarga el video o audio"""
     nombre_archivo = str(uuid.uuid4())
     ffmpeg_disponible = verificar_ffmpeg()
-    
+
     base_opts = _ydl_base_opts()
     base_opts['outtmpl'] = str(DOWNLOAD_FOLDER / f'{nombre_archivo}.%(ext)s')
     base_opts['progress_hooks'] = [lambda d: hook_progreso(d, callback_id)]
@@ -245,15 +230,13 @@ def descargar_video(url, formato_id, es_audio=False, callback_id=None):
             'format': formato_id if formato_id else 'best',
             'merge_output_format': 'mp4',
         }
-    
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             archivo_generado = ydl.prepare_filename(info)
-            
-            # Si es audio y no se convirtió a MP3, cambiar extensión si es necesario
+
             if es_audio and not ffmpeg_disponible:
-                # Renombrar a .mp3 aunque sea otro formato
                 archivo_sin_ext = archivo_generado.rsplit('.', 1)[0]
                 archivo_mp3 = archivo_sin_ext + '.mp3'
                 if archivo_generado != archivo_mp3:
@@ -261,7 +244,7 @@ def descargar_video(url, formato_id, es_audio=False, callback_id=None):
                     archivo_generado = archivo_mp3
             elif es_audio and ffmpeg_disponible:
                 archivo_generado = archivo_generado.rsplit('.', 1)[0] + '.mp3'
-            
+
             return {
                 'success': True,
                 'archivo': archivo_generado,
@@ -274,7 +257,6 @@ def descargar_video(url, formato_id, es_audio=False, callback_id=None):
         }
 
 def hook_progreso(d, callback_id):
-    """Callback para progreso"""
     if callback_id and callback_id in descargas_activas:
         if d['status'] == 'downloading':
             if 'total_bytes' in d:
@@ -287,6 +269,30 @@ def hook_progreso(d, callback_id):
             descargas_activas[callback_id]['progreso'] = 100
             descargas_activas[callback_id]['completado'] = True
 
+def _procesar_siguiente():
+    with queue_lock:
+        if not download_queue:
+            return
+        download_id = download_queue.popleft()
+        item = descargas_activas.get(download_id)
+        if not item or item['status'] != 'queued':
+            return
+        item['status'] = 'downloading'
+
+    def worker(did, url, fmt, audio):
+        try:
+            download_semaphore.acquire()
+            resultado = descargar_video(url, fmt, audio, did)
+            if did in descargas_activas:
+                descargas_activas[did]['resultado'] = resultado
+                descargas_activas[did]['completado'] = True
+        finally:
+            download_semaphore.release()
+            _procesar_siguiente()
+
+    t = threading.Thread(target=worker, args=(download_id, item['url'], item['formato_id'], item['es_audio']))
+    t.start()
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -296,7 +302,7 @@ def get_info():
     url = request.json.get('url')
     if not url:
         return jsonify({'error': 'URL no proporcionada'}), 400
-    
+
     info = obtener_info_video(url)
     return jsonify(info)
 
@@ -305,72 +311,88 @@ def download():
     url = request.json.get('url')
     formato_id = request.json.get('formato_id')
     es_audio = request.json.get('es_audio', False)
-    
+
     if not url:
         return jsonify({'error': 'URL no proporcionada'}), 400
-    
+
     download_id = str(uuid.uuid4())
-    
-    def descarga_background():
-        resultado = descargar_video(url, formato_id, es_audio, download_id)
-        descargas_activas[download_id]['resultado'] = resultado
-        descargas_activas[download_id]['completado'] = True
-    
+
     descargas_activas[download_id] = {
+        'status': 'queued',
         'progreso': 0,
         'completado': False,
-        'resultado': None
+        'resultado': None,
+        'url': url,
+        'formato_id': formato_id,
+        'es_audio': es_audio,
     }
-    
-    thread = threading.Thread(target=descarga_background)
-    thread.start()
-    
-    return jsonify({'download_id': download_id})
+
+    with queue_lock:
+        en_cola = sum(1 for d in descargas_activas.values() if d['status'] == 'queued')
+        posicion = en_cola
+        download_queue.append(download_id)
+
+    # Si hay slots libres, arranca inmediato
+    with queue_lock:
+        activos = sum(1 for d in descargas_activas.values() if d['status'] == 'downloading')
+    if activos < MAX_CONCURRENT:
+        _procesar_siguiente()
+        posicion = 0
+
+    return jsonify({'download_id': download_id, 'posicion': posicion})
 
 @app.route('/progress/<download_id>')
 def progress(download_id):
     if download_id not in descargas_activas:
         return jsonify({'error': 'ID no encontrado'}), 404
-    
+
     data = descargas_activas[download_id]
-    
+
+    # Calcular posicion en cola
+    posicion = 0
+    with queue_lock:
+        ids_cola = list(download_queue)
+        if download_id in ids_cola:
+            posicion = ids_cola.index(download_id) + 1
+
     if data['completado'] and data['resultado']:
         if data['resultado']['success']:
             return jsonify({
-                'completado': True,
+                'status': 'completado',
                 'success': True,
                 'archivo': os.path.basename(data['resultado']['archivo']),
                 'nombre': data['resultado']['nombre']
             })
         else:
             return jsonify({
-                'completado': True,
+                'status': 'error',
                 'success': False,
                 'error': data['resultado']['error']
             })
-    
+
     return jsonify({
-        'completado': False,
-        'progreso': data['progreso']
+        'status': data['status'],
+        'progreso': data['progreso'],
+        'posicion': posicion,
     })
 
 @app.route('/download_file/<filename>')
 def download_file(filename):
     filepath = DOWNLOAD_FOLDER / filename
-    
+
     if not filepath.exists():
         return jsonify({'error': 'Archivo no encontrado'}), 404
-    
+
     @after_this_request
     def eliminar_archivo(response):
         try:
-            time.sleep(1)  # Esperar 1 segundo antes de eliminar
+            time.sleep(1)
             if filepath.exists():
                 filepath.unlink()
         except:
             pass
         return response
-    
+
     return send_file(
         filepath,
         as_attachment=True,
@@ -378,6 +400,5 @@ def download_file(filename):
     )
 
 if __name__ == '__main__':
-    # Render usa el puerto asignado por la variable de entorno
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
