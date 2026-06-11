@@ -29,6 +29,8 @@ desktop.ini
 # Cookies (NUNCA subir a git - contiene tokens de autenticacion)
 cookies.txt
 cookies_*.txt
+cookies_b64.txt
+.cookies_tmp.txt
 quick_test.py
 test_*.py
 
